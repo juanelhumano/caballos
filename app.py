@@ -4,13 +4,14 @@ import random
 import string
 
 app = Flask(__name__)
-# Permitir conexiones externas (como GitHub Pages)
+# Permitir conexiones externas (desde GitHub Pages)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Estructuras de datos en memoria
-users = {}  # Guarda correspondencia -> request.sid: nickname
-rooms = {}  # Guarda el estado -> código: { 'creator': sid, 'bets': {}, 'active': False }
-horses = ['Rojo', 'Azul', 'Verde', 'Amarillo']
+users = {}  
+rooms = {}  
+# Los 7 caballos competidores
+horses = ['Rojo', 'Azul', 'Verde', 'Amarillo', 'Naranja', 'Morado', 'Blanco']
 
 def generate_room_code():
     """Genera un código único de 5 letras/números en mayúsculas"""
@@ -40,9 +41,6 @@ def handle_create_room():
     join_room(room_code)
     # Le indicamos al cliente que él creó la sala
     emit('room_response', {'room': room_code, 'is_creator': True})
-    
-    nick = users.get(request.sid, 'Anónimo')
-    print(f"Sala {room_code} creada por {nick}")
 
 @socketio.on('join_room')
 def handle_join_room(data):
@@ -50,7 +48,6 @@ def handle_join_room(data):
     
     if room_code in rooms:
         join_room(room_code)
-        # Verificamos si por algún motivo es el creador reconectándose o un espectador
         is_creator = (rooms[room_code]['creator'] == request.sid)
         
         emit('room_response', {'room': room_code, 'is_creator': is_creator})
@@ -74,7 +71,7 @@ def handle_bet(data):
 def handle_start(data):
     room = data['room'].upper()
     if room in rooms:
-        # VALIDACIÓN CRÍTICA: ¿El que presiona el botón es realmente el dueño?
+        # Validar que el que presiona el botón es el creador de la sala
         if rooms[room]['creator'] == request.sid:
             if not rooms[room]['active']:
                 rooms[room]['active'] = True
@@ -88,17 +85,19 @@ def run_race(room):
     winner = None
     
     while not winner:
-        socketio.sleep(0.4)
+        socketio.sleep(0.4) # Pausa entre cada "tick" de avance
         for h in horses:
-            progress[h] += random.randint(3, 14)
+            progress[h] += random.randint(3, 14) # Avance aleatorio
             if progress[h] >= 100:
                 winner = h
                 
         socketio.emit('race_update', progress, to=room)
     
+    # Calcular y emitir ganadores
     winners = [nick for nick, color in rooms[room]['bets'].items() if color == winner]
     socketio.emit('race_finished', {'winner': winner, 'bet_winners': winners}, to=room)
     
+    # Reiniciar estado de la sala
     rooms[room]['active'] = False
     rooms[room]['bets'] = {}
 
