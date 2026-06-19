@@ -39,7 +39,6 @@ def handle_create_room():
         'active': False
     }
     join_room(room_code)
-    # Le indicamos al cliente que él creó la sala
     emit('room_response', {'room': room_code, 'is_creator': True})
 
 @socketio.on('join_room')
@@ -49,7 +48,6 @@ def handle_join_room(data):
     if room_code in rooms:
         join_room(room_code)
         is_creator = (rooms[room_code]['creator'] == request.sid)
-        
         emit('room_response', {'room': room_code, 'is_creator': is_creator})
         
         nick = users.get(request.sid, 'Anónimo')
@@ -64,14 +62,20 @@ def handle_bet(data):
     nick = users.get(request.sid, 'Anónimo')
     
     if room in rooms and not rooms[room]['active']:
-        rooms[room]['bets'][nick] = color
-        emit('bet_placed', {'nick': nick, 'color': color}, to=room)
+        # VALIDACIÓN: Evitar múltiples apuestas por el mismo usuario
+        if nick in rooms[room]['bets']:
+            emit('error_msg', {'msg': 'Ya realizaste una apuesta para esta carrera.'}, to=request.sid)
+        else:
+            rooms[room]['bets'][nick] = color
+            # Avisar a toda la sala
+            emit('bet_placed', {'nick': nick, 'color': color}, to=room)
+            # Avisar SOLO al usuario para bloquear sus botones
+            emit('bet_accepted', {'color': color}, to=request.sid)
 
 @socketio.on('start_race')
 def handle_start(data):
     room = data['room'].upper()
     if room in rooms:
-        # Validar que el que presiona el botón es el creador de la sala
         if rooms[room]['creator'] == request.sid:
             if not rooms[room]['active']:
                 rooms[room]['active'] = True
@@ -85,19 +89,18 @@ def run_race(room):
     winner = None
     
     while not winner:
-        socketio.sleep(0.4) # Pausa entre cada "tick" de avance
+        socketio.sleep(0.4)
         for h in horses:
-            progress[h] += random.randint(3, 14) # Avance aleatorio
+            progress[h] += random.randint(3, 14) 
             if progress[h] >= 100:
                 winner = h
                 
         socketio.emit('race_update', progress, to=room)
     
-    # Calcular y emitir ganadores
     winners = [nick for nick, color in rooms[room]['bets'].items() if color == winner]
     socketio.emit('race_finished', {'winner': winner, 'bet_winners': winners}, to=room)
     
-    # Reiniciar estado de la sala
+    # Reiniciar sala para la próxima carrera
     rooms[room]['active'] = False
     rooms[room]['bets'] = {}
 
